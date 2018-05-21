@@ -7,7 +7,7 @@ cd(foldername);
 h5fname = strcat(scan,'_green.h5');
 if ~exist(h5fname,'file')
     info = sbx2hdf5(scan);
-else
+else 
     info = load([scan '.mat']);
     info = info.info;
 end
@@ -18,9 +18,11 @@ FOV = size(read_file(h5fname,1,1));
 % register files one by one. use template obtained from file n to
 % initialize template of file n + 1; 
 
+
 options_mc = NoRMCorreSetParms('d1',FOV(1),'d2',FOV(2),'grid_size',[128,128],'init_batch',200,...
-                'overlap_pre',64,'mot_uf',4,'bin_width',200,'max_shift',24,'max_dev',8,'us_fac',50,...
-                'output_type','h5');
+                    'overlap_pre',64,'mot_uf',4,'bin_width',200,'max_shift',24,'max_dev',8,'us_fac',50,...
+                    'output_type','h5','mem_batch_size',500,'correct_bidir',false);
+
 %%
 
 append = '_mc';
@@ -35,57 +37,17 @@ end
 %% downsample h5 files and save into a single memory mapped matlab file
     
 
-fr = info.resfreq/info.recordsPerBuffer; % frame rate
-% add Yr dataset
-% npixels = prod(sizY(1:end-1));
-% h5create(options_mc.h5_filename,'/Yr',[npixels sizY(end)]);
-% parfor i = 1:batch_size:sizY(end)
-%    lastframe = min(i+batch_size-1,sizY(end)); nframes = lastframe-i+1;
-%    flatMat= reshape(h5read(options_mc.h5_filename,'/mov',[1 1 i],[sizY(1:end-1), nframes] ),[npixels nframes]);
-%    h5write(options_mc.h5_filename,'/Yr',flatMat,[1 i],[npixels,nframes]);
-%     
-% end
-% aligned_file = options_mc.h5_filename;
-% data_type = class(read_file(aligned_file,1,1));
-% datFile = strcat(scan,'_data.mat');
-% % if ~exist(datFile,'file')
-% data = matfile(datFile,'Writable',true);
-% data.Y  = zeros([FOV,0],data_type);
-% data.Yr = zeros([prod(FOV),0],data_type);
-% data.sizY = [FOV,0];
-% F_dark = Inf;                         % dark fluorescence (min of all data)
+if isfield(info,'otparam')
+    if ~isempty(info.otparam)
+        fr = info.resfreq/info.recordsPerBuffer/(length(info.otparam)-1);
+    else
+        fr = info.resfreq/info.recordsPerBuffer;
+    end
+else
+    fr = info.resfreq/info.recordsPerBuffer; % frame rate
+end
 batch_size = 2000;                    % read chunks of that size
-% cnt = 0;                              % number of frames processed so far
-% tt1 = tic;
-% 
-% name = options_mc.h5_filename;
-% mc_info = h5info(name);
-% dims = mc_info.Datasets.Dataspace.Size;
-% ndimsY = length(dims);                % number of dimensions (data array might be already reshaped)
-% Ts = dims(end);
-% Ysub = zeros(FOV(1),FOV(2),Ts,data_type);
-% data.Y(FOV(1),FOV(2),Ts) = zeros(1,data_type);
-% data.Yr(prod(FOV),Ts) = zeros(1,data_type);
-% cnt_sub = 0;
-% for t = 1:batch_size:Ts
-%     Y = bigread2(name,t,min(batch_size,Ts-t+1));
-%     F_dark = min(nanmin(Y(:)),F_dark);
-%     ln = size(Y,ndimsY);
-%     Y = reshape(Y,[FOV,ln]);
-%     ln = size(Y,3);
-%     Ysub(:,:,cnt_sub+1:cnt_sub+ln) = Y;
-%     cnt_sub = cnt_sub + ln;
-% end
-% data.Y(:,:,cnt+1:cnt+cnt_sub) = Ysub;
-% data.Yr(:,cnt+1:cnt+cnt_sub) = reshape(Ysub,[],cnt_sub);
-% toc(tt1);
-% cnt = cnt + cnt_sub;
-% data.sizY(1,3) = cnt;
-% data.F_dark = F_dark;
-% Y=[]; Ysub=[];
-% else
-%     data = matfile(datFile,'Writable',true);
-% end
+
 
 %% now run CNMF on patches on the downsampled file, set parameters first
 
@@ -101,7 +63,7 @@ K = 8;                                            % number of components to be f
 tau = 10;                                          % std of gaussian kernel (half size of neuron) 
 p = 2;                                            % order of autoregressive system (p = 0 no dynamics, p=1 just decay, p = 2, both rise and decay)
 merge_thr = 0.7;                                  % merging threshold
-% sizY = data.sizY;
+
 
 options = CNMFSetParms(...
     'd1',sizY(1),'d2',sizY(2),...
@@ -115,11 +77,11 @@ options = CNMFSetParms(...
     'df_prctile',50,...                         % take the median of background fluorescence to compute baseline fluorescence 
     'fr',fr,...                            % downsamples
     'space_thresh',0.7,...                      % space correlation acceptance threshold
-    'min_SNR',5.0,...                           % trace SNR acceptance threshold
+    'min_SNR',3.0,...                           % trace SNR acceptance threshold
     'nb',1,...                                  % number of background components per patch
     'gnb',3,...                                 % number of global background components
-    'cnn_thr',0.4,...
-    'decay_time',1.0);                       % length of typical transient for the indicator used
+    'cnn_thr',0.2,...
+    'decay_time',.5);                       % length of typical transient for the indicator used
 
 
 
@@ -128,17 +90,11 @@ options = CNMFSetParms(...
 [A,b,C,f,S,P,RESULTS,YrA] = run_CNMF_patches(data,K,patches,tau,0,options);  % do not perform deconvolution here since
                                                                              % we are operating on downsampled data
 %% compute correlation image on a small sample of the data (optional - for visualization purposes) 
-% data.A = A;
-% data.b = b;
-% data.C = C;
-% data.f = f;
-% data.S = S;
-% data.P = P;
-% data.RESULTS = RESULTS;
-% data.YrA = YrA;
 % edited to use h5
-Cn = correlation_image_max(h5read(data,'/mov',[1 1 1],[sizY(1) sizY(2) min(1000,sizY(end))]),8);
-% Cn = correlation_image_max(data.Y(:,:,1:min(1000,sizY(end))),8);
+
+
+% Cn = correlation_image_max(h5read(data,'/mov',[1 1 1],[sizY(1) sizY(2) min(1000,sizY(end))]),8);
+
 
 
 %% classify components
@@ -173,7 +129,7 @@ R_tmp = YrA(keep,:);
 A= []; C=[]; YrA=[];
 % % % kill deadband ROIs
 cm = com(A_tmp,sizY(1),sizY(2));
-cm_keep = cm(:,2)>75 & cm(:,2)<720;
+cm_keep = cm(:,2)>edge1 & cm(:,2)<edge2;
 
 A_keep = A_tmp(:,cm_keep);
 C_keep = C_tmp(cm_keep,:);
@@ -218,10 +174,6 @@ end
 svfile = matfile(strcat(scan,'_cnmf_results_pre.mat'),'Writable',true);
 svfile.options = options; svfile.A_keep=A_keep; svfile.C_keep=C_keep;
 svfile.R_keep=R_keep; svfile.S_dec=S_dec; svfile.C_dec=C_dec; svfile.b = b;
-svfile.f=f; svfile.P=P; svfile.RESULTS = RESULTS; svfile.Cn = Cn; 
+svfile.f=f; svfile.P=P; svfile.RESULTS = RESULTS; %svfile.Cn = Cn; 
 svfile.template = template; svfile.F_dff=F_dff; svfile.F0 = F0; svfile.C_dec = C_dec;
-svfile.bl = bl;
-% save(strcat(scan,'_cnmf_results_pre.mat'),...
-%     'options','A_keep','C_keep','R_keep','S_dec','C_dec','b','f','P','RESULTS',...
-%     'Cn','F_dff','F0','C_dec','bl')
-% end
+svfile.bl = bl; 
