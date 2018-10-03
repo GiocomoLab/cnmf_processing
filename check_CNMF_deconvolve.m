@@ -1,7 +1,7 @@
 load(fullfile(outputfolder,strcat(scan,'_cnmf_results_pre.mat')));
 
 template_sc = template/max(max(template));
-template_sc(template_sc>.2) = .2;
+% template_sc(template_sc>.2) = .2;
 
 %
 cm = com(A_keep,options.d1,options.d2,options.d3);

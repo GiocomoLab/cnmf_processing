@@ -1,18 +1,16 @@
 % complete pipeline for calcium imaging data pre-processing
 %function run_cnmf(foldername,scan)
+%%%%%% inputs: foldername, scan_cell (cell array of scan file names),
+%%%%%% output_name
+%%
 
 gcp; % start a parallel engine
 cd(foldername);
 
 %% convert sbx to hdf5
 cd(foldername);
-h5fname = strcat(scan,'_green.h5');
-if ~exist(h5fname,'file')
-    info = sbx2hdf5(scan);
-else
-    info = load([scan '.mat']);
-    info = info.info;
-end
+h5fname = strcat(output_name,'_green.h5');
+[info_cell,max_idx, fr] = sbx2hdf5_concatScan(scan,output_name);
 FOV = size(read_file(h5fname,1,1));
 
 
@@ -25,31 +23,15 @@ options_mc = NoRMCorreSetParms('d1',FOV(1),'d2',FOV(2),'grid_size',[128,128],'in
     'overlap_pre',64,'mot_uf',4,'bin_width',200,'max_shift',24,'max_dev',8,'us_fac',50,...
     'output_type','h5','mem_batch_size',500,'correct_bidir',false);
 
-%%
-
 append = '_mc';
 options_mc.h5_filename = fullfile(foldername,[h5fname(1:end-3),append,'.h5']);
 if ~exist(options_mc.h5_filename,'file')
     [M,shifts,template,options_mc,col_shift] = normcorre_batch(h5fname,options_mc,[]);
-    save(fullfile(foldername,[scan,'_green_shifts',append,'.mat']),'shifts','-v7.3');
+    save(fullfile(foldername,[output_name,'_green_shifts',append,'.mat']),'shifts','-v7.3');
     % save shifts of each file at the respective folder
 end
 
 data = options_mc.h5_filename;
-
-
-%% downsample h5 files and save into a single memory mapped matlab file
-
-
-if isfield(info,'otparam')
-    if ~isempty(info.otparam)
-        fr = info.resfreq/info.recordsPerBuffer/(length(info.otparam)-1);
-    else
-        fr = info.resfreq/info.recordsPerBuffer;
-    end
-else
-    fr = info.resfreq/info.recordsPerBuffer; % frame rate
-end
 batch_size = 2000;                    % read chunks of that size
 
 
@@ -167,8 +149,8 @@ for i = 1:N
 end
 
 
-%% save results
-svfile = matfile(strcat(scan,'_cnmf_results_pre.mat'),'Writable',true);
+ %% save results
+svfile = matfile(strcat(output_name,'_cnmf_results_pre.mat'),'Writable',true);
 svfile.options = options; svfile.A_keep=A_keep; svfile.C_keep=C_keep;
 svfile.R_keep=R_keep; svfile.S_dec=S_dec; svfile.C_dec=C_dec; svfile.b = b;
 svfile.f=f; svfile.P=P; %svfile.RESULTS = RESULTS; %svfile.Cn = Cn;
